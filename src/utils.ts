@@ -1,4 +1,5 @@
 import { format as prettyFormat } from 'pretty-format'
+import type { PrettyFormatOptions } from 'pretty-format'
 import saveAs from 'file-saver'
 import type { RequestConfig } from './request'
 import CryptoJS from 'crypto-js'
@@ -21,7 +22,7 @@ export function hash(str: string): string {
  * @param opts {Options}
  * @returns string
  */
-export function stringify(input: unknown, opts?: StringifyOptions): string {
+export function stringify(input: unknown, opts?: PrettyFormatOptions): string {
     return prettyFormat(input, opts)
 }
 

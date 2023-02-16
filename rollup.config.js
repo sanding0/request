@@ -1,5 +1,4 @@
-import { externals } from 'rollup-plugin-node-externals'
-import { terser } from 'rollup-plugin-terser'
+import  terser from '@rollup/plugin-terser'
 import ts from '@rollup/plugin-typescript'
 export default {
     input: './src/index.ts',
@@ -18,5 +17,5 @@ export default {
         sourcemap: true,
       },
     ],
-    plugins:[externals(),ts(),terser()]
+    plugins:[ts(),terser()]
   }

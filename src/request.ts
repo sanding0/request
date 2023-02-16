@@ -21,8 +21,13 @@ import type {
 } from './interceptor-manager'
 import InterceptorManager from './interceptor-manager'
 import { getRequestHash } from './utils'
-
+import { withCache,LRUCache } from './with-cache'
 export type RequestType = InterceptorType
+
+export type Cache = {
+  maxLength?:number,
+  maxAge?:number
+}
 
 export type RequestOptions = Pick<
   AxiosRequestConfig,
@@ -43,6 +48,7 @@ export type RequestOptions = Pick<
 > & {
   baseURL: string
   baseRequestType?: RequestType
+  cache?:Cache
 }
 
 export type Response<T = any, D = any> = {
@@ -53,8 +59,8 @@ export type Response<T = any, D = any> = {
   config: AxiosRequestConfig<D>
 }
 
-export type RequestConfig = Pick<
-  AxiosRequestConfig,
+export type RequestConfig<D=any> = Pick<
+  AxiosRequestConfig<D>,
   | 'url'
   | 'method'
   | 'headers'
@@ -69,7 +75,16 @@ export type RequestConfig = Pick<
   | 'cancelToken'
 > & {
   requestType?: RequestType | string
-}
+}&(
+  {
+    withCache:true
+  }
+  |{
+    withCache?:false|undefined
+    throttleInterval?:number
+    debounceInterval?:number
+  }
+)
 
 export type Instance = AxiosInstance
 
@@ -95,13 +110,19 @@ export default class Request {
 
   #abortKeys: string[] = []
 
+  #throttleTimers: Map<string,NodeJS.Timeout|null> = new Map()
+
+  #debounceTimers: Map<string,NodeJS.Timeout|null> = new Map()
+
+  #cache: LRUCache
+
   #interceptorManager: InterceptorManager = new InterceptorManager()
 
   constructor({ baseRequestType = 'base', ...restConfig }: RequestOptions) {
     this.#service = axios.create(restConfig)
     this.#initConfig = restConfig
     this.#baseRequestType = baseRequestType
-
+    this.#cache = new LRUCache({maxLength:restConfig.cache?.maxLength||10,maxAge:restConfig.cache?.maxAge||3*60*1000})
     this.#useRequestInterceptors()
     this.#useResponseInterceptors()
   }
@@ -290,16 +311,10 @@ export default class Request {
     return this.#service.getUri(config)
   }
 
-  public request<R = Response<Data>, D = Data>(
-    url: string,
-    data?: D,
-    config?: RequestConfig
-  ): Promise<R> {
+  public async request<R = Response<Data>, D = Data>(config?: RequestConfig<D>): Promise<R> {
     const newConfig: RequestConfig = {
       requestType: this.#baseRequestType,
-      ...config,
-      url,
-      data,
+      ...config
     }
 
     const key = getRequestHash(newConfig)
@@ -319,6 +334,49 @@ export default class Request {
       })
     }
 
+    if(newConfig.withCache){
+      const lr = withCache(this.#service.request,key,this.#cache)
+      return lr(newConfig)
+    }
+
+    if(newConfig.debounceInterval){
+      let debounceTimeout:NodeJS.Timeout|null|undefined
+      if(this.#debounceTimers.has(key)){
+        debounceTimeout = this.#debounceTimers.get(key)
+      }else{
+        debounceTimeout = null
+      }
+      return new Promise(resolve=>{
+        debounceTimeout&&clearTimeout(debounceTimeout)
+        debounceTimeout = setTimeout(async()=>{
+          resolve(await this.#service.request(newConfig))
+          this.#debounceTimers.delete(key)
+        },newConfig.debounceInterval)
+        this.#debounceTimers.set(key,debounceTimeout)
+      })
+    }
+
+    if(newConfig.throttleInterval){
+      let throttleTimeout:NodeJS.Timeout|null|undefined
+      if(this.#throttleTimers.has(key)){
+        throttleTimeout = this.#throttleTimers.get(key)
+      }else{
+        throttleTimeout = null
+      }
+
+      return new Promise((resolve,reject)=>{
+        if(!throttleTimeout){
+          throttleTimeout = setTimeout(async() => {
+            resolve(await this.#service.request(newConfig))
+            this.#throttleTimers.delete(key)
+          }, newConfig.throttleInterval);
+          this.#throttleTimers.set(key,throttleTimeout)
+        }else{
+          reject()
+        }
+      })
+    }
+
     return this.#service.request(newConfig)
   }
 
@@ -334,51 +392,51 @@ export default class Request {
   }
 
   public get<R = Response<Data>, P = Params>(
-    url: string,
+    url?: string,
     params?: P,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>(url, null, { ...config, method: 'get', params })
+    return this.request<R>({url,...config, method: 'get', params })
   }
 
   public delete<R = Response<Data>, D = Data>(
-    url: string,
+    url?: string,
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>(url, data, { ...config, method: 'delete' })
+    return this.request<R>({url, data, ...config, method: 'delete' })
   }
 
-  public head<R = Response<Data>>(url: string, config?: RequestConfig): Promise<R> {
-    return this.request<R>(url, '', { ...config, method: 'head' })
+  public head<R = Response<Data>>(url?: string, config?: RequestConfig): Promise<R> {
+    return this.request<R>({url, ...config, method: 'head' })
   }
 
-  public options<R = Response<Data>>(url: string, config?: RequestConfig): Promise<R> {
-    return this.request<R>(url, '', { ...config, method: 'options' })
+  public options<R = Response<Data>>(url?: string, config?: RequestConfig): Promise<R> {
+    return this.request<R>({url, ...config, method: 'options' })
   }
 
   public post<R = Response<Data>, D = Data>(
-    url: string,
+    url?: string,
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>(url, data, { ...config, method: 'post' })
+    return this.request<R>({url, data, ...config, method: 'post' })
   }
 
   public put<R = Response<Data>, D = Data>(
-    url: string,
+    url?: string,
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>(url, data, { ...config, method: 'put' })
+    return this.request<R>({url, data, ...config, method: 'put' })
   }
 
   public patch<R = Response<Data>, D = Data>(
-    url: string,
+    url?: string,
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>(url, data, { ...config, method: 'patch' })
+    return this.request<R>({url, data, ...config, method: 'patch' })
   }
 
   /**
@@ -390,8 +448,8 @@ export default class Request {
    * @returns
    */
   public upload<R = Response<Data>>(
-    url: string,
-    data: FormData,
+    url?: string,
+    data?: FormData,
     onUploadProgress?: (progressEvent: ProgressEvent) => void,
     config?: RequestConfig
   ): Promise<R> {
@@ -399,7 +457,9 @@ export default class Request {
       throw new CustomError('upload require formData', 'runtime')
     }
 
-    return this.request<R>(url, data, {
+    return this.request<R>({
+      url,
+      data,
       ...config,
       onUploadProgress,
     })
@@ -413,12 +473,14 @@ export default class Request {
    * @param filename: string | callback
    */
   public async download<D = Data>(
-    url: string,
+    url?: string,
     data?: D,
     config?: RequestConfig,
     filename?: string | (() => string)
   ): Promise<void> {
-    const res = await this.request(url, data, {
+    const res = await this.request({
+      url,
+      data,
       method: 'get',
       ...config,
     })

@@ -1,20 +1,20 @@
 {
     "$schema": "https://json.schemastore.org/tsconfig",
     "compilerOptions": {
-        "target": "ESNext", 
+        "target": "ESNext",
         "module": "ESNext",
         "lib": [
             "ESNext",
             "DOM",
             "DOM.Iterable"
-        ], 
+        ],
         "declaration": true,
         "outDir": "dist",
-        "noEmit": true, 
+        "noEmit": true,
         "strict": true,
         "noImplicitAny": true,
         "moduleResolution": "node",
-        "baseUrl": "./", 
+        "baseUrl": "./",
         "esModuleInterop": true,
         "skipLibCheck": true,
         "forceConsistentCasingInFileNames": true

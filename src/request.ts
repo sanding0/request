@@ -1,54 +1,54 @@
-import { download } from './utils'
-import { typeOf } from './utils'
+import { download } from "./utils"
+import { typeOf } from "./utils"
 import type {
   AxiosInstance,
   AxiosRequestConfig,
   AxiosResponseHeaders,
   Canceler,
   Method as AxiosMethod,
-} from 'axios'
-import axios from 'axios'
-import type { Handler } from 'mitt'
+} from "axios"
+import axios from "axios"
+import type { Handler } from "mitt"
 
-import Emitter, { Events } from './emitter'
-import { CustomError } from './error'
+import Emitter, { Events } from "./emitter"
+import { CustomError } from "./error"
 import type {
   InterceptorType,
   Meta,
   RequestInterceptor,
   ResponseInterceptor,
   Skipper,
-} from './interceptor-manager'
-import InterceptorManager from './interceptor-manager'
-import { getRequestHash } from './utils'
-import { withCache,LRUCache } from './with-cache'
+} from "./interceptor-manager"
+import InterceptorManager from "./interceptor-manager"
+import { getRequestHash } from "./utils"
+import { withCache, LRUCache } from "./with-cache"
 export type RequestType = InterceptorType
 
 export type Cache = {
-  maxLength?:number,
-  maxAge?:number
+  maxLength?: number
+  maxAge?: number
 }
 
 export type RequestOptions = Pick<
   AxiosRequestConfig,
-  | 'baseURL'
-  | 'headers'
-  | 'paramsSerializer'
-  | 'timeout'
-  | 'timeoutErrorMessage'
-  | 'withCredentials'
-  | 'onUploadProgress'
-  | 'onDownloadProgress'
-  | 'maxContentLength'
-  | 'maxBodyLength'
-  | 'httpAgent'
-  | 'httpsAgent'
-  | 'proxy'
-  | 'decompress'
+  | "baseURL"
+  | "headers"
+  | "paramsSerializer"
+  | "timeout"
+  | "timeoutErrorMessage"
+  | "withCredentials"
+  | "onUploadProgress"
+  | "onDownloadProgress"
+  | "maxContentLength"
+  | "maxBodyLength"
+  | "httpAgent"
+  | "httpsAgent"
+  | "proxy"
+  | "decompress"
 > & {
   baseURL: string
   baseRequestType?: RequestType
-  cache?:Cache
+  cache?: Cache
 }
 
 export type Response<T = any, D = any> = {
@@ -59,32 +59,32 @@ export type Response<T = any, D = any> = {
   config: AxiosRequestConfig<D>
 }
 
-export type RequestConfig<D=any> = Pick<
+export type RequestConfig<D = any> = Pick<
   AxiosRequestConfig<D>,
-  | 'url'
-  | 'method'
-  | 'headers'
-  | 'onDownloadProgress'
-  | 'onUploadProgress'
-  | 'timeout'
-  | 'timeoutErrorMessage'
-  | 'data'
-  | 'responseType'
-  | 'params'
-  | 'signal'
-  | 'cancelToken'
+  | "url"
+  | "method"
+  | "headers"
+  | "onDownloadProgress"
+  | "onUploadProgress"
+  | "timeout"
+  | "timeoutErrorMessage"
+  | "data"
+  | "responseType"
+  | "params"
+  | "signal"
+  | "cancelToken"
 > & {
   requestType?: RequestType | string
-}&(
-  {
-    withCache:true
-  }
-  |{
-    withCache?:false|undefined
-    throttleInterval?:number
-    debounceInterval?:number
-  }
-)
+} & (
+    | {
+        withCache: true
+      }
+    | {
+        withCache?: false | undefined
+        throttleInterval?: number
+        debounceInterval?: number
+      }
+  )
 
 export type Instance = AxiosInstance
 
@@ -110,19 +110,26 @@ export default class Request {
 
   #abortKeys: string[] = []
 
-  #throttleTimers: Map<string,NodeJS.Timeout|null> = new Map()
+  #throttleTimers: Map<string, NodeJS.Timeout | null> = new Map()
 
-  #debounceTimers: Map<string,NodeJS.Timeout|null> = new Map()
+  #debounceTimers: Map<string, NodeJS.Timeout | null> = new Map()
+
+  #debounceAbort: Map<string, AbortController> = new Map()
+
+  #debounceAndThrottleCache: Map<string, Response<Data>> = new Map()
 
   #cache: LRUCache
 
   #interceptorManager: InterceptorManager = new InterceptorManager()
 
-  constructor({ baseRequestType = 'base', ...restConfig }: RequestOptions) {
+  constructor({ baseRequestType = "base", ...restConfig }: RequestOptions) {
     this.#service = axios.create(restConfig)
     this.#initConfig = restConfig
     this.#baseRequestType = baseRequestType
-    this.#cache = new LRUCache({maxLength:restConfig.cache?.maxLength||10,maxAge:restConfig.cache?.maxAge||3*60*1000})
+    this.#cache = new LRUCache({
+      maxLength: restConfig.cache?.maxLength || 10,
+      maxAge: restConfig.cache?.maxAge || 3 * 60 * 1000,
+    })
     this.#useRequestInterceptors()
     this.#useResponseInterceptors()
   }
@@ -146,7 +153,7 @@ export default class Request {
         )
       },
       (err) => {
-        this.#emitter?.emit('error', err)
+        this.#emitter?.emit("error", err)
 
         return Promise.reject(err)
       }
@@ -168,13 +175,16 @@ export default class Request {
             config.requestType || this.#baseRequestType
           )
         } catch (e: any) {
-          const message = typeof e === 'string' ? e : e.message || 'response interceptor error'
+          const message =
+            typeof e === "string"
+              ? e
+              : e.message || "response interceptor error"
 
-          const error = new CustomError(message, 'runtime', {
+          const error = new CustomError(message, "runtime", {
             cause: e,
           })
 
-          this.#emitter?.emit('error', error)
+          this.#emitter?.emit("error", error)
           throw error
         }
 
@@ -186,9 +196,12 @@ export default class Request {
         }
 
         if (axios.isCancel(err)) {
-          return Promise.reject(new Error('request canceled'))
+          return Promise.reject(new Error("request canceled"))
         }
-        this.#emitter?.emit('error', new CustomError('network error', 'network', { cause: err }))
+        this.#emitter?.emit(
+          "error",
+          new CustomError("network error", "network", { cause: err })
+        )
 
         return Promise.reject(err)
       }
@@ -199,6 +212,64 @@ export default class Request {
     this.#interceptorManager = manager
   }
 
+  #getDebounceRequest<R = Response<Data>>(
+    key: string,
+    config: RequestConfig,
+    debounceInterval: number
+  ): Promise<R> {
+    let debounceTimeout: NodeJS.Timeout | null | undefined = null
+    if (this.#debounceTimers.has(key)) {
+      debounceTimeout = this.#debounceTimers.get(key)
+    }
+
+    return new Promise((resolve, reject) => {
+      if (debounceTimeout) {
+        clearTimeout(debounceTimeout)
+        this.#debounceAbort.get(key)?.abort("debounce")
+        this.#debounceAbort.delete(key)
+      }
+      const controller = new AbortController()
+      const signal = controller.signal
+
+      const listener = () => {
+        reject(signal.reason)
+      }
+
+      debounceTimeout = setTimeout(() => {
+        signal.removeEventListener("abort", listener)
+        resolve(this.#service.request(config))
+        this.#debounceTimers.delete(key)
+        this.#debounceAbort.delete(key)
+      }, debounceInterval)
+      signal.addEventListener("abort", listener)
+      this.#debounceAbort.set(key, controller)
+      this.#debounceTimers.set(key, debounceTimeout)
+    })
+  }
+
+  #getThrottleRequest<R = Response<Data>>(
+    key: string,
+    config: RequestConfig,
+    throttleInterval: number
+  ): Promise<R> {
+    let throttleTimeout: NodeJS.Timeout | null | undefined = null
+    if (this.#throttleTimers.has(key)) {
+      throttleTimeout = this.#throttleTimers.get(key)
+    }
+
+    return new Promise((resolve, reject) => {
+      if (!throttleTimeout) {
+        throttleTimeout = setTimeout(() => {
+          resolve(this.#service.request(config))
+          this.#debounceAbort.delete(key)
+          this.#throttleTimers.delete(key)
+        }, throttleInterval)
+        this.#throttleTimers.set(key, throttleTimeout)
+      } else {
+        reject("throttle")
+      }
+    })
+  }
   /**
    * 添加请求拦截
    * @param interceptor :RequestCallBack
@@ -207,13 +278,13 @@ export default class Request {
   public addRequestInterceptors(...interceptors: RequestInterceptor[]): void {
     // this.#interceptorManager.clearRequestObserver()
     for (const item of interceptors) {
-      if (typeof item === 'function') {
+      if (typeof item === "function") {
         this.#interceptorManager.addRequestObserver({
           type: this.#baseRequestType,
           callback: item,
         })
-      } else if (typeof item === 'object') {
-        if ('type' in item && !!item.type) {
+      } else if (typeof item === "object") {
+        if ("type" in item && !!item.type) {
           this.#interceptorManager.addRequestObserver(item)
         } else {
           item.type = this.#baseRequestType
@@ -250,13 +321,13 @@ export default class Request {
    */
   public addResponseInterceptors(...interceptors: ResponseInterceptor[]): void {
     for (const item of interceptors) {
-      if (typeof item === 'function') {
+      if (typeof item === "function") {
         this.#interceptorManager.addResponseObserver({
           type: this.#baseRequestType,
           callback: item,
         })
-      } else if (typeof item === 'object') {
-        if ('type' in item && !!item.type) {
+      } else if (typeof item === "object") {
+        if ("type" in item && !!item.type) {
           this.#interceptorManager.addResponseObserver(item)
         } else {
           item.type = this.#baseRequestType
@@ -271,7 +342,10 @@ export default class Request {
    * @param event :eventName
    * @param handler :handler
    */
-  public addEventListener<K extends keyof Events>(event: K, handler: Handler<Events[K]>) {
+  public addEventListener<K extends keyof Events>(
+    event: K,
+    handler: Handler<Events[K]>
+  ) {
     if (!this.#emitter) {
       this.#emitter = new Emitter()
     }
@@ -311,16 +385,18 @@ export default class Request {
     return this.#service.getUri(config)
   }
 
-  public async request<R = Response<Data>, D = Data>(config?: RequestConfig<D>): Promise<R> {
+  public async request<R = Response<Data>, D = Data>(
+    config?: RequestConfig<D>
+  ): Promise<R> {
     const newConfig: RequestConfig = {
       requestType: this.#baseRequestType,
-      ...config
+      ...config,
     }
 
-    const key = getRequestHash(newConfig)
+    const key = getRequestHash({ ...config })
 
     // if AbortController is supported, use it
-    if (typeof AbortController !== 'undefined') {
+    if (typeof AbortController !== "undefined") {
       const controller = new AbortController()
 
       newConfig.signal = controller.signal
@@ -334,47 +410,25 @@ export default class Request {
       })
     }
 
-    if(newConfig.withCache){
-      const lr = withCache(this.#service.request,key,this.#cache)
+    if (newConfig.withCache) {
+      const lr = withCache(this.#service.request, key, this.#cache)
       return lr(newConfig)
     }
 
-    if(newConfig.debounceInterval){
-      let debounceTimeout:NodeJS.Timeout|null|undefined
-      if(this.#debounceTimers.has(key)){
-        debounceTimeout = this.#debounceTimers.get(key)
-      }else{
-        debounceTimeout = null
-      }
-      return new Promise(resolve=>{
-        debounceTimeout&&clearTimeout(debounceTimeout)
-        debounceTimeout = setTimeout(async()=>{
-          resolve(await this.#service.request(newConfig))
-          this.#debounceTimers.delete(key)
-        },newConfig.debounceInterval)
-        this.#debounceTimers.set(key,debounceTimeout)
-      })
+    if (newConfig.debounceInterval) {
+      return this.#getDebounceRequest<R>(
+        key,
+        newConfig,
+        newConfig.debounceInterval
+      )
     }
 
-    if(newConfig.throttleInterval){
-      let throttleTimeout:NodeJS.Timeout|null|undefined
-      if(this.#throttleTimers.has(key)){
-        throttleTimeout = this.#throttleTimers.get(key)
-      }else{
-        throttleTimeout = null
-      }
-
-      return new Promise((resolve,reject)=>{
-        if(!throttleTimeout){
-          throttleTimeout = setTimeout(async() => {
-            resolve(await this.#service.request(newConfig))
-            this.#throttleTimers.delete(key)
-          }, newConfig.throttleInterval);
-          this.#throttleTimers.set(key,throttleTimeout)
-        }else{
-          reject()
-        }
-      })
+    if (newConfig.throttleInterval) {
+      return this.#getThrottleRequest<R>(
+        key,
+        newConfig,
+        newConfig.throttleInterval
+      )
     }
 
     return this.#service.request(newConfig)
@@ -382,7 +436,7 @@ export default class Request {
 
   #addAbortKeys(key: string, config: RequestConfig, cancel: Canceler): void {
     if (this.#abortKeys.includes(key)) {
-      this.#emitter?.emit('warn', {
+      this.#emitter?.emit("warn", {
         config,
         cancel,
       })
@@ -391,12 +445,16 @@ export default class Request {
     }
   }
 
+  public getCache(): LRUCache {
+    return this.#cache
+  }
+
   public get<R = Response<Data>, P = Params>(
     url?: string,
     params?: P,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>({url,...config, method: 'get', params })
+    return this.request<R>({ url, ...config, method: "get", params })
   }
 
   public delete<R = Response<Data>, D = Data>(
@@ -404,15 +462,21 @@ export default class Request {
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>({url, data, ...config, method: 'delete' })
+    return this.request<R>({ url, data, ...config, method: "delete" })
   }
 
-  public head<R = Response<Data>>(url?: string, config?: RequestConfig): Promise<R> {
-    return this.request<R>({url, ...config, method: 'head' })
+  public head<R = Response<Data>>(
+    url?: string,
+    config?: RequestConfig
+  ): Promise<R> {
+    return this.request<R>({ url, ...config, method: "head" })
   }
 
-  public options<R = Response<Data>>(url?: string, config?: RequestConfig): Promise<R> {
-    return this.request<R>({url, ...config, method: 'options' })
+  public options<R = Response<Data>>(
+    url?: string,
+    config?: RequestConfig
+  ): Promise<R> {
+    return this.request<R>({ url, ...config, method: "options" })
   }
 
   public post<R = Response<Data>, D = Data>(
@@ -420,7 +484,7 @@ export default class Request {
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>({url, data, ...config, method: 'post' })
+    return this.request<R>({ url, data, ...config, method: "post" })
   }
 
   public put<R = Response<Data>, D = Data>(
@@ -428,7 +492,7 @@ export default class Request {
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>({url, data, ...config, method: 'put' })
+    return this.request<R>({ url, data, ...config, method: "put" })
   }
 
   public patch<R = Response<Data>, D = Data>(
@@ -436,7 +500,7 @@ export default class Request {
     data?: D,
     config?: RequestConfig
   ): Promise<R> {
-    return this.request<R>({url, data, ...config, method: 'patch' })
+    return this.request<R>({ url, data, ...config, method: "patch" })
   }
 
   /**
@@ -453,8 +517,8 @@ export default class Request {
     onUploadProgress?: (progressEvent: ProgressEvent) => void,
     config?: RequestConfig
   ): Promise<R> {
-    if (typeOf(data) !== 'formdata') {
-      throw new CustomError('upload require formData', 'runtime')
+    if (typeOf(data) !== "formdata") {
+      throw new CustomError("upload require formData", "runtime")
     }
 
     return this.request<R>({
@@ -481,7 +545,7 @@ export default class Request {
     const res = await this.request({
       url,
       data,
-      method: 'get',
+      method: "get",
       ...config,
     })
     let resType
@@ -490,25 +554,25 @@ export default class Request {
       resType = typeOf(res.data)
     } catch {
       throw new CustomError(
-        'watch out the responseInterceptors, set the requestType and interceptor type to skip the interceptor',
-        'runtime'
+        "watch out the responseInterceptors, set the requestType and interceptor type to skip the interceptor",
+        "runtime"
       )
     }
 
-    const fileNameStr = typeof filename === 'function' ? filename() : filename
+    const fileNameStr = typeof filename === "function" ? filename() : filename
 
-    if (resType === 'arraybuffer') {
+    if (resType === "arraybuffer") {
       const blob = new Blob([res.data])
 
       download(blob, fileNameStr)
-    } else if (resType === 'blob') {
+    } else if (resType === "blob") {
       download(res.data, fileNameStr)
-    } else if (res.data.data && typeOf(res.data.data) === 'string') {
+    } else if (res.data.data && typeOf(res.data.data) === "string") {
       download(res.data.data, fileNameStr)
     } else {
       throw new CustomError(
-        'download query should response blob | string | arrayBuffer type',
-        'runtime'
+        "download query should response blob | string | arrayBuffer type",
+        "runtime"
       )
     }
   }

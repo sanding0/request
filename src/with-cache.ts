@@ -1,10 +1,12 @@
 interface CacheNodeManage {
-  append: (key: unknown) => void;
+  append: (key: string) => void;
   lastNode: () => CacheNode;
-  find: (key: unknown) => CacheNode | null;
-  remove: (key: unknown) => unknown;
+  find: (key: string) => CacheNode | null;
+  remove: (key: string) => unknown;
   removeFirst: () => unknown;
 }
+
+type cacheNodeKey = undefined | string
 
 type LruParam = {
   maxLength: number;
@@ -14,8 +16,8 @@ type LruParam = {
 class CacheNode {
   pre: CacheNode | null;
   next: CacheNode | null;
-  index: unknown;
-  constructor(index?: unknown) {
+  index: cacheNodeKey;
+  constructor(index?: cacheNodeKey) {
     this.index = index;
     this.next = null;
     this.pre = null;
@@ -27,11 +29,11 @@ class CacheNodeManager implements CacheNodeManage{
   head:CacheNode
   length:number = 0
   constructor(){
-    this.node = new CacheNode()
+    this.node = new CacheNode('first')
     this.head = this.node
   }
 
-  append(key: unknown) :void{
+  append(key: string) :void{
     const lastNode = this.lastNode()
     const newNode = new CacheNode(key)
     lastNode.next = newNode
@@ -56,14 +58,25 @@ class CacheNodeManager implements CacheNodeManage{
     return head
   }
 
-  remove(key:unknown):unknown{
-    let remoevNode = this.find(key)
-    let removeKey = null
-    if(remoevNode){
-      removeKey = remoevNode.index
-      let nextNode = remoevNode?.next
-      let preNode = remoevNode?.pre
-      remoevNode=null
+
+  list():Array<cacheNodeKey>{
+    let { head } = this
+    const list = []
+    while(head.next){
+      list.push(head.next.index)
+      head = head.next
+    }
+    return list
+  }
+
+  remove(key:string):cacheNodeKey{
+    let removeNode = this.find(key)
+    let removeKey = undefined
+    if(removeNode){
+      removeKey = removeNode.index
+      let nextNode = removeNode?.next
+      let preNode = removeNode?.pre
+      removeNode=null
       if(preNode){
         if(nextNode){
           nextNode.pre = preNode
@@ -74,6 +87,7 @@ class CacheNodeManager implements CacheNodeManage{
       }else if(nextNode){
         nextNode.pre = null
       }
+      this.length--
     }
     return removeKey
   }
@@ -112,7 +126,7 @@ export class LRUCache{
     this.#ageMap = new Map()
   }
 
-  get(key:unknown){
+  get(key:string){
     if(this.#map.has(key)){
       this.#cacheNodeManager.remove(key)
       this.#cacheNodeManager.append(key)
@@ -123,11 +137,11 @@ export class LRUCache{
     }
   }
 
-  deleteAge(key:unknown){
+  deleteAge(key:string){
     clearTimeout(this.#ageMap.get(key))
   }
 
-  set(key:unknown,value:unknown){
+  set(key:string,value:unknown){
     const timeout = setTimeout(()=>{
       this.#map.delete(this.#cacheNodeManager.remove(key))
     },this.#maxAge)
@@ -151,11 +165,11 @@ export class LRUCache{
     this.#ageMap.set(key,value)
   }
 
-  has(key:unknown){
+  has(key:string){
     return this.#map.has(key)
   }
 
-  delete(key:unknown){
+  delete(key:string){
     if(this.#map.has(key)){
       this.#map.delete(key)
       this.deleteAge(key)
